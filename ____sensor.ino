@@ -1,104 +1,113 @@
+#include <ESP8266WiFi.h>
+#include <MicroGear.h>
+#include <ESP8266HTTPClient.h>
+#include <ArduinoJson.h>
+const char* ssid     = "TOPIC_DEV"; //change this to your SSID
+const char* password = "1212312121"; //change this to your PASSWORD
 
-#include <Wire.h>
-#include "TSL2561.h"
+const char* host = "https://basebots.herokuapp.com/bot.php";
+#define APPID   "Basebot"
+#define KEY     "VL3Ntfnptg9LOOh"
+#define SECRET  "Q7vloIhwHWBeCYOJkb5YT3qGM"
 
-//DHTesp dht;
-TSL2561 tsl(TSL2561_ADDR_FLOAT); 
+#define ALIAS   "bots" //set name of drvice
+#define TargetWeb "switch" //set target name of web
 
-#include "DHT.h"
-#define DHTPIN 12 
-#define DHTTYPE DHT11
-DHT dht(DHTPIN, DHTTYPE);
+WiFiClient client;
+String uid = "";
+int timer = 0;
+MicroGear microgear(client);
+
+void onMsghandler(char *topic, uint8_t* msg, unsigned int msglen) { // 
+    Serial.print("Incoming message -->");
+    msg[msglen] = '\0';
+Serial.println((char *)msg);
+    if(*(char *)msg == '1'){
+        digitalWrite(LED_BUILTIN, LOW);   // LED on
+        //microgear.chat(TargetWeb,"1");
+        //send_data("ESP_LED_ON");
+        send_json("ESP LED ON");
+    }else{
+        digitalWrite(LED_BUILTIN, HIGH);  // LED off
+      //microgear.chat(TargetWeb,"0");
+      //send_data("ESP_LED_OFF");
+      send_json("ESP LED OFF");
+    }
+}
+
+void onConnected(char *attribute, uint8_t* msg, unsigned int msglen) {
+    Serial.println("Connected to NETPIE...");
+    microgear.setName(ALIAS);
+}
 
 
-void setup()
-{
-  Serial.begin(115200);
-dht.begin();
+void setup() {
+    microgear.on(MESSAGE,onMsghandler);
+    microgear.on(CONNECTED,onConnected);
+
+    Serial.begin(115200);
+    Serial.println("Starting...");
+
+    pinMode(LED_BUILTIN, OUTPUT);
+  
+    if (WiFi.begin(ssid, password)) {
+        while (WiFi.status() != WL_CONNECTED) {
+            delay(500);
+            Serial.print(".");
+        }
+    }
+
+Serial.println("WiFi connected");
+    Serial.println("IP address: ");
+    Serial.println(WiFi.localIP());
+
+    microgear.init(KEY,SECRET,ALIAS);
+    microgear.connect(APPID);
+     digitalWrite(LED_BUILTIN, HIGH);   // LED on
+}
+
+void send_json(String data){
+  StaticJsonBuffer<300> JSONbuffer;   //Declaring static JSON buffer
+    JsonObject& JSONencoder = JSONbuffer.createObject(); 
  
-
-}
-void loop()
-{
-  TEMP();
-  //soil sensor();
- light();
-
-
-
-}
-void TEMP(){
- delay(2000);
- float h = dht.readHumidity();
- float t = dht.readTemperature();
-
-Serial.print("Humidity: ");  Serial.print(h); Serial.print(" %\t");
-  
-Serial.print("Temperature: ");  Serial.print(t);  Serial.println(" *C ");
-
+    JSONencoder["ESP"] = data;
  
+    JsonArray& values = JSONencoder.createNestedArray("values"); //JSON array
+    values.add(20); //Add value to array
+    values.add(21); //Add value to array
+    values.add(23); //Add value to array
+ 
+ 
+    char JSONmessageBuffer[300];
+    JSONencoder.prettyPrintTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
+    Serial.println(JSONmessageBuffer);
+ 
+    HTTPClient http;    //Declare object of class HTTPClient
+ 
+    http.begin(host);      //Specify request destination
+    http.addHeader("Content-Type", "application/json");  //Specify content-type header
+ 
+    int httpCode = http.POST(JSONmessageBuffer);   //Send the request
+    String payload = http.getString();                                        //Get the response payload
+ 
+    Serial.println(httpCode);   //Print HTTP return code
+    Serial.println(payload);    //Print request response payload
+ 
+    http.end();  //Close connection
 }
-/*
-void soil sensor(){
-int sensorPin = A0
-int sensorValue = analogRead(sensorPin); 
-Serial.print("Moisture of Soil:  ");
-Serial.println("sensorValue");
+void loop() {
+    if (microgear.connected()) {
+        Serial.println("..."); 
+        microgear.loop();
+        timer = 0;
+    }
+    else {
+        Serial.println("connection lost, reconnect...");
+        if (timer >= 5000) {
+            microgear.connect(APPID); 
+            timer = 0;
+        }
+        else timer += 100;
+    }
+    delay(100);
 }
-*/
-
-void light(){
-  
-if (tsl.begin()) {
-    Serial.println("Found sensor");
-  } 
-  else {
-    Serial.println("No sensor?");
-    while (1);
-  }
-
-    
-  //tsl.setGain(TSL2561_GAIN_0X);         // set no gain (for bright situtations)
-  tsl.setGain(TSL2561_GAIN_16X);      // set 16x gain (for dim situations)
-  
-  tsl.setTiming(TSL2561_INTEGRATIONTIME_13MS);  // shortest integration time (bright light)
-  //tsl.setTiming(TSL2561_INTEGRATIONTIME_101MS);  // medium integration time (medium light)
-  //tsl.setTiming(TSL2561_INTEGRATIONTIME_402MS);  // longest integration time (dim light)
-
-  uint16_t x = tsl.getLuminosity(TSL2561_VISIBLE);     
-  //uint16_t x = tsl.getLuminosity(TSL2561_FULLSPECTRUM);
-  //uint16_t x = tsl.getLuminosity(TSL2561_INFRARED);
-  
-  Serial.println(x, DEC);
-
-  
-  uint32_t lum = tsl.getFullLuminosity();
-  uint16_t ir, full;
-  ir = lum >> 16;
-  full = lum & 0xFFFF;
-  Serial.print("IR: "); Serial.print(ir);   Serial.print("\t\t");
-  Serial.print("Full: "); Serial.print(full);   Serial.print("\t");
-  Serial.print("Visible: "); Serial.print(full - ir);   Serial.print("\t");
-  
-  Serial.print("Lux: "); Serial.println(tsl.calculateLux(full, ir));
-  
-  delay(1000); 
-}
-
-void DS1820 {
-
-  
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
